@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Messages</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2334c759'/><path d='M50 22c-18 0-32 11-32 25 0 8 5 15 12 19l-3 12 14-8c3 1 6 1 9 1 18 0 32-11 32-24S68 22 50 22z' fill='white'/></svg>">
+</head>
+<body>
+<div id="login" class="overlay hidden">
+  <form id="loginForm" class="card">
+    <h2>Messages</h2>
+    <p>Enter the server token. On the Mac running imsg, open Terminal and run<br><code>~/.local/bin/imsg-service --token</code> to see it.</p>
+    <input id="tokenInput" type="password" placeholder="token" autocomplete="current-password" autofocus>
+    <button type="submit">Connect</button>
+    <div id="loginErr" class="err"></div>
+  </form>
+</div>
+
+<div id="app" class="app">
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">
+      <div class="sidebar-title">Messages</div>
+      <button id="newBtn" class="icon-btn" title="New message">✎</button>
+    </div>
+    <div class="search-wrap">
+      <input id="search" type="search" placeholder="Search  (Enter searches all messages)">
+    </div>
+    <div id="chatList" class="chat-list"></div>
+    <div id="connState" class="conn">connecting…</div>
+  </aside>
+
+  <main id="main" class="main">
+    <header class="chat-head">
+      <button id="backBtn" class="icon-btn back" title="Back">‹</button>
+      <div class="chat-head-text">
+        <div id="chatTitle" class="chat-title">Select a conversation</div>
+        <div id="chatSub" class="chat-sub"></div>
+      </div>
+    </header>
+    <div id="messages" class="messages">
+      <div id="loadMore" class="load-more hidden">Load earlier messages</div>
+      <div id="msgList"></div>
+    </div>
+    <div id="dropHint" class="drop-hint hidden">Drop files to attach</div>
+    <div id="chips" class="chips hidden"></div>
+    <footer class="composer">
+      <button id="attachBtn" class="icon-btn" title="Attach file">＋</button>
+      <input id="fileInput" type="file" multiple class="hidden">
+      <div class="input-wrap">
+        <textarea id="input" rows="1" placeholder="iMessage"></textarea>
+        <button id="emojiBtn" class="icon-btn inside" title="Emoji">☺</button>
+      </div>
+      <button id="sendBtn" class="send-btn" title="Send">↑</button>
+    </footer>
+    <div id="emojiPanel" class="emoji-panel hidden">
+      <input id="emojiSearch" type="search" placeholder="Search emoji">
+      <div id="emojiGrid" class="emoji-grid"></div>
+    </div>
+  </main>
+</div>
+
+<div id="picker" class="overlay hidden">
+  <div class="card picker">
+    <div class="picker-head">
+      <input id="pickerSearch" type="search" placeholder="Name, phone, or email" autocomplete="off">
+      <button id="pickerClose" class="icon-btn">✕</button>
+    </div>
+    <div id="pickerList" class="picker-list"></div>
+  </div>
+</div>
+
+<div id="lightbox" class="overlay hidden"><img id="lightboxImg" alt=""></div>
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>

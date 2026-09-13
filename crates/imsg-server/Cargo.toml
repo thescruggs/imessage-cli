@@ -1,0 +1,30 @@
+[package]
+name = "imsg-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+imsg-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+clap.workspace = true
+directories.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum = { version = "0.8", features = ["ws", "multipart", "macros"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+imessage-database = "4.2"
+rusqlite = { version = "=0.40.0", features = ["bundled"] }
+notify = "8"
+rand = "0.9"
+mime_guess = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+tower = { version = "0.5", features = ["util"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,28 @@
+[package]
+name = "imsg-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "imsg"
+path = "src/main.rs"
+
+[dependencies]
+imsg-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+clap.workspace = true
+directories.workspace = true
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
+tokio-tungstenite = { version = "0.26", features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+emojis = "0.6"
+unicode-width = "0.2"
+textwrap = "0.16"
+tui-textarea = "0.7"
