@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let token = load_or_create_token(args.token)?;
     let db_path = args.db.unwrap_or_else(|| db::expand_home("~/Library/Messages/chat.db"));
-    let db = Db::open(&db_path).with_context(|| {
+    let db = Db::open(&db_path).map(|db| db.with_seen_file(config_dir().join("seen.json"))).with_context(|| {
         format!(
             "cannot open {}. Grant Full Disk Access to imsg-server (System Settings > Privacy & Security > Full Disk Access); when running it by hand from a terminal, the terminal app needs it too.",
             db_path.display()
@@ -142,6 +142,7 @@ async fn main() -> Result<()> {
         .route("/chats", get(chats_handler))
         .route("/chats/{id}", get(chat_handler))
         .route("/chats/{id}/messages", get(messages_handler))
+        .route("/chats/{id}/seen", post(seen_handler))
         .route("/messages/{guid}", get(message_handler))
         .route("/contacts", get(contacts_handler))
         .route("/contacts/{id}/photo", get(contact_photo_handler))
@@ -246,6 +247,30 @@ async fn chat_handler(State(st): State<AppState>, AxPath(id): AxPath<i64>) -> Ap
         Some(c) => Ok(Json(c).into_response()),
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
+}
+
+#[derive(Deserialize, Default)]
+struct SeenBody {
+    /// Newest message the client displayed; omitted means the chat's newest message.
+    message_id: Option<i64>,
+}
+
+/// Mark a chat as viewed up to a message. Messages.app owns the real read
+/// flag, so this only affects imsg's own unread counts, which every client
+/// then receives through the `chats` websocket event.
+async fn seen_handler(State(st): State<AppState>, AxPath(id): AxPath<i64>, body: Option<Json<SeenBody>>) -> ApiResult<Response> {
+    let message_id = body.map(|b| b.message_id).unwrap_or_default();
+    let chat = with_db(&st, move |db, book| {
+        let Some(chat) = db.chat_by_id(id, book)? else { return Ok(None) };
+        db.mark_seen(id, message_id)?;
+        db.chat_by_id(id, book).map(|c| c.or(Some(chat)))
+    })
+    .await?;
+    let Some(chat) = chat else { return Ok(StatusCode::NOT_FOUND.into_response()) };
+    if let Ok(chats) = with_db(&st, |db, book| db.chats(100, book)).await {
+        let _ = st.tx.send(WsEvent::Chats { chats });
+    }
+    Ok(Json(chat).into_response())
 }
 
 #[derive(Deserialize)]

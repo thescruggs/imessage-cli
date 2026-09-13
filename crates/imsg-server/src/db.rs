@@ -31,6 +31,11 @@ pub struct Db {
     conn: Connection,
     handles: HashMap<i64, String>,
     handles_loaded_max: i64,
+    /// Highest message ROWID a client has viewed, per chat. Messages.app owns
+    /// the real `is_read` flag and nothing outside it can set that, so imsg
+    /// keeps its own record and subtracts it from the unread count.
+    seen: HashMap<i64, i64>,
+    seen_path: Option<PathBuf>,
 }
 
 impl Db {
@@ -41,9 +46,52 @@ impl Db {
         )
         .with_context(|| format!("open {}", path.display()))?;
         let _ = conn.pragma_update(None, "cache_size", -32_768_i64);
-        let mut db = Db { conn, handles: HashMap::new(), handles_loaded_max: 0 };
+        let mut db = Db { conn, handles: HashMap::new(), handles_loaded_max: 0, seen: HashMap::new(), seen_path: None };
         db.refresh_handles()?;
         Ok(db)
+    }
+
+    /// Persist "seen" marks in `path` (JSON `{ "<chat_id>": <message_id> }`), loading any existing file.
+    pub fn with_seen_file(mut self, path: PathBuf) -> Self {
+        match std::fs::read_to_string(&path) {
+            Ok(s) => match serde_json::from_str::<HashMap<String, i64>>(&s) {
+                Ok(m) => self.seen = m.into_iter().filter_map(|(k, v)| k.parse().ok().map(|k| (k, v))).collect(),
+                Err(e) => tracing::warn!("ignoring unreadable {}: {e}", path.display()),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!("cannot read {}: {e}", path.display()),
+        }
+        self.seen_path = Some(path);
+        self
+    }
+
+    /// Record that everything in `chat_id` up to `message_id` (or the newest
+    /// message when `None`) has been viewed. Returns the id that was recorded.
+    pub fn mark_seen(&mut self, chat_id: i64, message_id: Option<i64>) -> Result<i64> {
+        let id = match message_id {
+            Some(id) => id,
+            None => self.conn.query_row(
+                "SELECT COALESCE(MAX(message_id), 0) FROM chat_message_join WHERE chat_id = ?1",
+                [chat_id],
+                |r| r.get(0),
+            )?,
+        };
+        let current = self.seen.get(&chat_id).copied().unwrap_or(0);
+        if id > current {
+            self.seen.insert(chat_id, id);
+            self.save_seen()?;
+            return Ok(id);
+        }
+        Ok(current)
+    }
+
+    fn save_seen(&self) -> Result<()> {
+        let Some(path) = &self.seen_path else { return Ok(()) };
+        let map: HashMap<String, i64> = self.seen.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec(&map)?).with_context(|| format!("write {}", tmp.display()))?;
+        std::fs::rename(&tmp, path).with_context(|| format!("rename to {}", path.display()))?;
+        Ok(())
     }
 
     fn refresh_handles(&mut self) -> Result<()> {
@@ -132,9 +180,10 @@ impl Db {
             let Some(last_date) = last_date else { continue };
             let participants = self.chat_participants(id, book)?;
             let (last_preview, last_from_me) = self.last_preview(id)?;
+            let seen = self.seen.get(&id).copied().unwrap_or(0);
             let unread: i64 = self.conn.query_row(
-                "SELECT COUNT(*) FROM message m JOIN chat_message_join j ON j.message_id = m.ROWID WHERE j.chat_id = ?1 AND m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0 AND (m.associated_message_type IS NULL OR m.associated_message_type < 1000)",
-                [id],
+                "SELECT COUNT(*) FROM message m JOIN chat_message_join j ON j.message_id = m.ROWID WHERE j.chat_id = ?1 AND m.ROWID > ?2 AND m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0 AND (m.associated_message_type IS NULL OR m.associated_message_type < 1000)",
+                params![id, seen],
                 |r| r.get(0),
             )?;
             out.push(Chat {
@@ -727,7 +776,56 @@ fn clean_text_run(t: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_text, clean_text_run};
+    use super::{clean_text, clean_text_run, Db};
+    use rusqlite::Connection;
+
+    fn fixture(dir: &std::path::Path) -> std::path::PathBuf {
+        // Minimal slice of the chat.db schema: two incoming unread messages in chat 1.
+        let path = dir.join("chat.db");
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+             CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, guid TEXT, chat_identifier TEXT, service_name TEXT, display_name TEXT, style INTEGER);
+             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER, message_date INTEGER);
+             CREATE TABLE message (ROWID INTEGER PRIMARY KEY, is_from_me INTEGER, is_read INTEGER, item_type INTEGER, associated_message_type INTEGER);
+             INSERT INTO chat VALUES (1, 'g1', 'c1', 'iMessage', NULL, 45);
+             INSERT INTO message VALUES (10, 0, 0, 0, 0), (11, 0, 0, 0, 0);
+             INSERT INTO chat_message_join VALUES (1, 10, 100), (1, 11, 200);",
+        )
+        .unwrap();
+        path
+    }
+
+    fn unread(db: &mut Db, chat: i64) -> i64 {
+        let seen = db.seen.get(&chat).copied().unwrap_or(0);
+        db.conn
+            .query_row(
+                "SELECT COUNT(*) FROM message m JOIN chat_message_join j ON j.message_id = m.ROWID WHERE j.chat_id = ?1 AND m.ROWID > ?2 AND m.is_from_me = 0 AND m.is_read = 0",
+                rusqlite::params![chat, seen],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn seen_marks_reduce_unread_and_persist() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = fixture(dir.path());
+        let seen_path = dir.path().join("seen.json");
+        let mut db = Db::open(&db_path).unwrap().with_seen_file(seen_path.clone());
+        assert_eq!(unread(&mut db, 1), 2);
+        assert_eq!(db.mark_seen(1, Some(10)).unwrap(), 10);
+        assert_eq!(unread(&mut db, 1), 1);
+        // Marking an older message never moves the mark backwards.
+        assert_eq!(db.mark_seen(1, Some(5)).unwrap(), 10);
+        // No id means "everything currently in the chat".
+        assert_eq!(db.mark_seen(1, None).unwrap(), 11);
+        assert_eq!(unread(&mut db, 1), 0);
+        drop(db);
+        let mut again = Db::open(&db_path).unwrap().with_seen_file(seen_path);
+        assert_eq!(again.seen.get(&1), Some(&11));
+        assert_eq!(unread(&mut again, 1), 0);
+    }
 
     #[test]
     fn formatted_runs_preserve_spaces_and_line_breaks() {

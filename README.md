@@ -351,6 +351,7 @@ Every `/api` route and `/ws` requires the token: `Authorization: Bearer`, a
 | `GET /api/info` | Server name, version, host, your own addresses |
 | `GET /api/chats?limit=` | Conversations, newest first, with participants, preview, unread |
 | `GET /api/chats/{id}/messages?limit=&before=` | Messages oldest→newest; `before` pages back by id |
+| `POST /api/chats/{id}/seen` | `{message_id}` (optional) marks the chat viewed up to that message; clears imsg's unread count and broadcasts `chats` |
 | `GET /api/messages/{guid}` | One message |
 | `GET /api/search?q=` | Search message text |
 | `GET /api/contacts` | Contacts (name, phones, emails, has_photo) |

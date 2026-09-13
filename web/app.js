@@ -25,6 +25,8 @@ const state = {
   pending: [], // {id, name, size, uploading}
   ws: null, info: null, searchMode: false,
   pickerSel: 0,
+  stick: true,       // keep the view pinned to the newest message while content grows
+  seen: new Map(),   // chat id -> newest message id reported to the server
 };
 
 // ---------- helpers ----------
@@ -90,6 +92,7 @@ async function loadContacts() { try { state.contacts = await api('/api/contacts'
 function mergeChats(chats) {
   // Websocket chat events contain only the newest 100 chats. Keep older
   // conversations already loaded by the HTTP snapshot and merge updates by ID.
+  for (const c of chats) { const seen = state.seen.get(c.id); if (seen && c.unread) { const list = state.messages.get(c.id); if (list && list.length && list[list.length - 1].id <= seen) c.unread = 0; } }
   state.chats = mergeChatLists(state.chats, chats);
   state.chatById = new Map(state.chats.map(c => [c.id, c]));
   renderChats(); if (state.currentId) { renderHeader(); ensureTail(state.currentId); } updateTitle();
@@ -101,7 +104,7 @@ async function ensureTail(id) {
   const newest = list.length ? list[list.length - 1].date : 0;
   if (c.last_date <= newest + 500) return;
   if (ensureTail.busy) return; ensureTail.busy = true;
-  try { const page = await api(`/api/chats/${id}/messages?limit=30`); mergeMessages(id, page.messages); if (state.currentId === id) renderMessages(true); }
+  try { const page = await api(`/api/chats/${id}/messages?limit=30`); mergeMessages(id, page.messages); if (state.currentId === id) { renderMessages(state.stick); markSeen(id); } }
   catch (e) {} finally { ensureTail.busy = false; }
 }
 function mergeMessages(chatId, msgs) {
@@ -132,7 +135,7 @@ function onNewMessages(msgs) {
       const c = state.chatById.get(m.chat_id); new Notification((m.sender?.name || m.sender?.address || 'Message') + (c?.is_group ? ` · ${chatTitle(c)}` : ''), { body: m.text || (m.attachments.length ? '📎 Attachment' : '') });
     }
   }
-  if (msgs.some(m => m.chat_id === state.currentId)) renderMessages(true);
+  if (msgs.some(m => m.chat_id === state.currentId)) { renderMessages(state.stick); markSeen(state.currentId); }
 }
 
 // ---------- sidebar ----------
@@ -188,7 +191,9 @@ async function openChat(id, highlightId) {
     catch (e) { els.msgList.innerHTML = '<div class="announce">Failed to load</div>'; return; }
   }
   if (state.currentId !== id) return;
-  renderMessages(true);
+  state.stick = !highlightId;
+  renderMessages(state.stick);
+  markSeen(id);
   if (highlightId) { const el = els.msgList.querySelector(`[data-id="${highlightId}"]`); if (el) { el.scrollIntoView({ block: 'center' }); el.style.outline = '2px solid var(--accent)'; setTimeout(() => el.style.outline = '', 2000); } }
   els.input.focus();
 }
@@ -210,7 +215,14 @@ async function loadOlder() {
   } catch (e) { toast('Failed to load'); }
   els.loadMore.textContent = 'Load earlier messages';
 }
-els.messages.addEventListener('scroll', () => { if (els.messages.scrollTop < 40 && state.hasMore.get(state.currentId)) loadOlder(); });
+els.messages.addEventListener('scroll', () => {
+  state.stick = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight < 80;
+  if (els.messages.scrollTop < 40 && state.hasMore.get(state.currentId)) loadOlder();
+});
+// Images and videos load after the list is rendered and make it taller. While the
+// view is pinned to the bottom, follow that growth so opening a chat lands on the
+// newest message instead of partway up.
+new ResizeObserver(() => { if (state.stick) els.messages.scrollTop = els.messages.scrollHeight; }).observe(els.msgList);
 
 function partHtml(p) {
   let h = linkify(p.text);
@@ -235,7 +247,6 @@ function renderMessages(stickBottom) {
   const c = state.chatById.get(state.currentId);
   const list = state.messages.get(state.currentId) || [];
   els.loadMore.classList.toggle('hidden', !state.hasMore.get(state.currentId));
-  const atBottom = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight < 80;
   const out = [];
   let lastDate = 0, lastFromMeIdx = -1;
   list.forEach((m, i) => { if (m.is_from_me) lastFromMeIdx = i; });
@@ -278,8 +289,24 @@ function renderMessages(stickBottom) {
   }
   if (!list.length && !state.newChat) out.push('<div class="announce">No messages</div>');
   els.msgList.innerHTML = out.join('');
-  if (stickBottom && (atBottom || true)) els.messages.scrollTop = els.messages.scrollHeight;
+  if (stickBottom) { state.stick = true; els.messages.scrollTop = els.messages.scrollHeight; }
 }
+
+// ---------- read state ----------
+// Messages.app owns the real read flag; the server keeps its own "seen up to"
+// mark per chat. Report the newest message on screen whenever the chat is open
+// in a visible tab, and clear the dot locally right away.
+async function markSeen(id) {
+  if (!id || id !== state.currentId || document.hidden) return;
+  const list = state.messages.get(id); const c = state.chatById.get(id);
+  const last = list && list.length ? list[list.length - 1].id : 0;
+  if (!last || (state.seen.get(id) >= last && !(c && c.unread))) return;
+  state.seen.set(id, last);
+  if (c && c.unread) { c.unread = 0; renderChats(); updateTitle(); }
+  try { await api(`/api/chats/${id}/seen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message_id: last }) }); }
+  catch (e) { state.seen.delete(id); }
+}
+window.addEventListener('focus', () => markSeen(state.currentId));
 els.msgList.addEventListener('click', (e) => {
   const img = e.target.closest('img.att-img'); if (img) { els.lightboxImg.src = img.dataset.full; els.lightbox.classList.remove('hidden'); }
 });
@@ -392,7 +419,7 @@ document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !e.shiftKey) { e.preventDefault(); els.search.focus(); els.search.select(); }
   if (e.key === 'Escape') { els.emojiPanel.classList.add('hidden'); els.lightbox.classList.add('hidden'); }
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden && state.currentId) renderMessages(false); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.currentId) { renderMessages(false); markSeen(state.currentId); } });
 
 // ---------- start ----------
 // A link of the form http://host:8787/#token=... (printed by the installer) logs in

@@ -93,8 +93,10 @@ code { background: var(--bg3); padding: 1px 5px; border-radius: 5px; }
 .reacts { display: flex; gap: 4px; margin-top: -8px; margin-bottom: 4px; padding: 0 8px; position: relative; z-index: 1; }
 .react { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 1px 6px; font-size: 13px; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
 .react.mine { background: var(--me); border-color: var(--me); color: #fff; }
-.time { font-size: 11px; color: var(--fg2); margin: 2px 12px; display: none; }
-.row:hover .time { display: block; }
+/* The timestamp slot always occupies its line (only rendered on the last bubble
+   of a sender group), so revealing it on hover never shifts the messages below. */
+.time { font-size: 11px; color: var(--fg2); margin: 0 12px; height: 15px; line-height: 15px; visibility: hidden; }
+.row:hover .time { visibility: visible; }
 .status { font-size: 11px; color: var(--fg2); margin: 2px 8px 6px; align-self: flex-end; }
 .status.err { color: #ff3b30; }
 .mention { font-weight: 700; }
