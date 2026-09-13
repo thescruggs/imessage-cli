@@ -5,7 +5,8 @@ members = ["crates/imsg-core", "crates/imsg-server", "crates/imsg-tui"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "Unlicense"
+repository = "https://github.com/thescruggs/imessage-cli"
 
 [workspace.dependencies]
 imsg-core = { path = "crates/imsg-core" }
