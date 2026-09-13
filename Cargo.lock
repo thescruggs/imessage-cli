@@ -1157,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "imsg-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "serde",
@@ -1166,7 +1166,7 @@ dependencies = [
 
 [[package]]
 name = "imsg-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1193,7 +1193,7 @@ dependencies = [
 
 [[package]]
 name = "imsg-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
