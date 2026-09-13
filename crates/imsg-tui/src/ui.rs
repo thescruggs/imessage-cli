@@ -12,6 +12,9 @@ use unicode_width::UnicodeWidthStr;
 
 const BLUE: Color = Color::Rgb(0, 122, 255);
 const GREEN: Color = Color::Rgb(52, 199, 89);
+/// Text colours used inside green (SMS/RCS) bubbles.
+const GREEN_FG: Color = Color::Rgb(0, 25, 8);
+const GREEN_MUTED: Color = Color::Rgb(20, 70, 35);
 const GRAY: Color = Color::Rgb(58, 58, 60);
 const DIM: Color = Color::Rgb(142, 142, 147);
 const ACCENT: Color = Color::Rgb(255, 214, 10);
@@ -137,11 +140,10 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     let width = inner.width as usize;
     let height = inner.height as usize;
     let is_group = app.current_chat().map(|c| c.is_group).unwrap_or(false);
-    let sms = app.current_chat().map(|c| c.service != "iMessage").unwrap_or(false);
     let msgs: Vec<Message> = app.current_messages().to_vec();
     let loading = app.current_chat_id().map(|id| app.loading.contains(&id)).unwrap_or(false);
     let has_more = app.current_chat_id().and_then(|id| app.has_more.get(&id).copied()).unwrap_or(false);
-    let r = render_messages(&msgs, width, is_group, sms, app.msg_sel, loading, has_more);
+    let r = render_messages(&msgs, width, is_group, app.msg_sel, loading, has_more);
     app.msg_total_lines = r.lines.len();
     app.msg_view_height = height;
     app.msg_line_ranges = r.ranges;
@@ -156,7 +158,7 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(p, inner);
 }
 
-fn render_messages(msgs: &[Message], width: usize, is_group: bool, sms: bool, sel: Option<usize>, loading: bool, has_more: bool) -> Rendered {
+fn render_messages(msgs: &[Message], width: usize, is_group: bool, sel: Option<usize>, loading: bool, has_more: bool) -> Rendered {
     let mut lines: Vec<Line<'static>> = vec![];
     let mut ranges = vec![];
     if loading {
@@ -184,8 +186,14 @@ fn render_messages(msgs: &[Message], width: usize, is_group: bool, sms: bool, se
                 lines.push(Line::from(Span::styled(text.clone(), Style::default().fg(DIM).italic())).alignment(Alignment::Center));
             }
             _ => {
-                let color = if m.is_from_me { if sms || m.service != "iMessage" { GREEN } else { BLUE } } else { GRAY };
-                let fg = Color::White;
+                // Colour per message, like Messages.app: a chat's service_name is
+                // whatever it was created as, and a single conversation mixes
+                // iMessage (blue) with SMS/RCS (green) over time.
+                let green = m.is_from_me && m.service != "iMessage";
+                let color = if m.is_from_me { if green { GREEN } else { BLUE } } else { GRAY };
+                // White on the green bubble is hard to read in most terminals.
+                let fg = if green { GREEN_FG } else { Color::White };
+                let muted = if green { GREEN_MUTED } else { Color::Rgb(220, 220, 220) };
                 // Sender name in groups
                 if is_group && !m.is_from_me {
                     let name = m.sender.as_ref().map(|s| s.display().to_string()).unwrap_or_else(|| "Unknown".into());
@@ -253,7 +261,7 @@ fn render_messages(msgs: &[Message], width: usize, is_group: bool, sms: bool, se
                     segs.push((format!("\n✨ sent with {e}"), base.italic()));
                 }
                 if m.is_edited {
-                    segs.push(("\nEdited".into(), base.italic().fg(Color::Rgb(220, 220, 220))));
+                    segs.push(("\nEdited".into(), base.italic().fg(muted)));
                 }
                 if segs.is_empty() {
                     let recent_mine = m.is_from_me && (chrono::Utc::now().timestamp_millis() - m.date) < 600_000;
@@ -616,7 +624,7 @@ mod tests {
     #[test]
     fn wide_emoji_rows_align() {
         let msgs = vec![msg(1, false, "Ok. Miss you and love you 😘"), msg(2, false, "plain")];
-        let r = render_messages(&msgs, 60, false, false, None, false, false);
+        let r = render_messages(&msgs, 60, false, None, false, false);
         let backend = TestBackend::new(60, 12);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| f.render_widget(Paragraph::new(Text::from(r.lines.clone())), f.area())).unwrap();
@@ -627,5 +635,28 @@ mod tests {
         let top = rows[1].find('▄').unwrap();
         let bottom = rows[3].find('▀').unwrap();
         assert_eq!(top, bottom, "top/bottom edge misaligned around wide emoji");
+    }
+
+    #[test]
+    fn bubble_colour_follows_each_message_service() {
+        // One conversation mixing services, like a chat whose service_name is SMS
+        // but whose recent messages went over iMessage.
+        let mut sms = msg(2, true, "green");
+        sms.service = "SMS".into();
+        let mut rcs = msg(3, true, "rcs");
+        rcs.service = "RCS".into();
+        let mut theirs = msg(4, false, "theirs");
+        theirs.service = "SMS".into();
+        let msgs = vec![msg(1, true, "blue"), sms, rcs, theirs];
+        let r = render_messages(&msgs, 60, false, None, false, false);
+        let style_of = |needle: &str| {
+            r.lines.iter().flat_map(|l| l.spans.iter()).find(|sp| sp.content.contains(needle)).map(|sp| sp.style).expect(needle)
+        };
+        assert_eq!(style_of("blue").bg, Some(BLUE));
+        assert_eq!(style_of("blue").fg, Some(Color::White));
+        assert_eq!(style_of("green").bg, Some(GREEN));
+        assert_eq!(style_of("green").fg, Some(GREEN_FG), "dark text on green bubbles");
+        assert_eq!(style_of("rcs").bg, Some(GREEN));
+        assert_eq!(style_of("theirs").bg, Some(GRAY), "incoming messages stay gray whatever the service");
     }
 }
