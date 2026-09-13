@@ -33,6 +33,7 @@ for bin in imsg-server imsg; do
 done
 cp scripts/install-server.sh "$STAGE/install-server.sh"
 cp README.md "$STAGE/README.md"
+cp LICENSE "$STAGE/LICENSE"
 chmod 755 "$STAGE/install-server.sh"
 tar -czf dist/imsg-macos-universal.tar.gz -C dist "imsg-$VERSION-macos"
 cp scripts/install.sh dist/install.sh

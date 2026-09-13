@@ -363,3 +363,8 @@ Every `/api` route and `/ws` requires the token: `Authorization: Bearer`, a
 Messages carry sender (with contact name), styled text parts, attachments,
 tapbacks, reply quotes, edited/unsent state, expressive effects,
 delivery/read timestamps, and app/link balloons.
+
+## License
+
+This is free and unencumbered software released into the public domain under
+[The Unlicense](LICENSE). Do whatever you want with it; no attribution required.
